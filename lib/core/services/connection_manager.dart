@@ -462,6 +462,7 @@ typedef ToolProgressCallback = void Function(Map<String, dynamic> progress);
 class GatewayChatClient {
   final ApiClient _api;
   final String _baseUrl;
+  http.Client? _streamClient;
 
   GatewayChatClient(this._api) : _baseUrl = _api.baseUrl;
 
@@ -580,7 +581,10 @@ class GatewayChatClient {
       request.headers.addAll(headers);
       request.body = jsonEncode(body);
 
-      final response = await _api._http.send(request);
+      // Use a dedicated HTTP client for this stream so abort() can
+      // close it without affecting the shared _api._http client.
+      _streamClient = http.Client();
+      final response = await _streamClient!.send(request);
 
       if (response.statusCode != 200) {
         final errorBody = await response.stream.bytesToString();
@@ -614,11 +618,15 @@ class GatewayChatClient {
       onDone();
     } catch (e) {
       onError(e.toString());
+    } finally {
+      _streamClient?.close();
+      _streamClient = null;
     }
   }
 
   void abort() {
-    _api.close();
+    _streamClient?.close();
+    _streamClient = null;
   }
 }
 
