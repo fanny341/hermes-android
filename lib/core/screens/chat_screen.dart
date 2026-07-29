@@ -231,10 +231,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
+      _scrollController.jumpTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
       );
     }
   }
@@ -387,6 +385,14 @@ class _ChatScreenState extends State<ChatScreen> {
                 (_messages.last['content'] as String) + token;
           }
         });
+        // Auto-scroll during streaming if user is near the bottom
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients &&
+              _scrollController.position.pixels >=
+                  _scrollController.position.maxScrollExtent - 250) {
+            _scrollToBottom();
+          }
+        });
       },
       onToolProgress: (progress) {
         if (!mounted) return;
@@ -406,6 +412,10 @@ class _ChatScreenState extends State<ChatScreen> {
             _sending = false;
             _showScrollToBottom = false;
           });
+          // Always scroll to bottom after receiving final messages
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollToBottom();
+          });
           if (_awaitingVoiceReply) {
             _awaitingVoiceReply = false;
             final assistant = messages.reversed.firstWhere(
@@ -416,24 +426,6 @@ class _ChatScreenState extends State<ChatScreen> {
             if (assistantText != null) {
               await _speakAssistantText(assistantText);
             }
-          }
-          final saved = _savedPositions[widget.session.id];
-          if (saved != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (_scrollController.hasClients) {
-                _scrollController.jumpTo(
-                  saved.clamp(0.0, _scrollController.position.maxScrollExtent),
-                );
-              }
-            });
-          } else {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (_scrollController.hasClients) {
-                _scrollController.jumpTo(
-                  _scrollController.position.maxScrollExtent,
-                );
-              }
-            });
           }
         } catch (e) {
           setState(() {
