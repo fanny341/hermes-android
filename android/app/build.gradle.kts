@@ -43,7 +43,25 @@ android {
 
    buildTypes {
        release {
-           signingConfig = signingConfigs.getByName("release")
+           // Use debug keystore if no release keystore configured
+           if (keystoreProperties.containsKey("storeFile")) {
+               signingConfig = signingConfigs.getByName("release")
+           }
+           isMinifyEnabled = true
+           isShrinkResources = true
+           proguardFiles(
+               getDefaultProguardFile("proguard-android-optimize.txt"),
+               "proguard-rules.pro"
+           )
+       }
+   }
+
+   splits {
+       abi {
+           enable true
+           reset()
+           include "arm64-v8a"
+           universalApk false
        }
    }
 }
