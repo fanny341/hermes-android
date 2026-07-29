@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -39,7 +40,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
       pathPrefix: widget.connection.gatewayPrefix ?? '',
     );
     _checkHealth();
+    // Periodic rebuild to reflect live streaming status in the list
+    _liveTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) setState(() {});
+    });
   }
+
+  Timer? _liveTimer;
 
   Future<void> _checkHealth() async {
     final ok = await _client.healthCheck();
@@ -51,6 +58,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
   void dispose() {
     _client.close();
     _searchController.dispose();
+    _liveTimer?.cancel();
     super.dispose();
   }
 
@@ -602,7 +610,16 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : null,
+                  : ChatScreen.streamingSessions.contains(session.id)
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFD4AF37)),
+                          ),
+                        )
+                      : null,
               title: Text(
                 session.title,
                 maxLines: 1,

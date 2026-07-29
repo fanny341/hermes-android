@@ -16,6 +16,12 @@ import '../utils/message_content.dart';
 import '../utils/responsive.dart';
 
 class ChatScreen extends StatefulWidget {
+  /// Per-session text field drafts (persisted in memory).
+  static final Map<String, String> sessionDrafts = {};
+
+  /// IDs of sessions currently streaming a response.
+  static final Set<String> streamingSessions = {};
+
   final SavedConnection connection;
   final Session session;
   final VoidCallback? onBack; // optional: called in master-detail to return to list
@@ -84,6 +90,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _initVoice();
     WidgetsBinding.instance.addObserver(this);
     _initModelInfo();
+    // Restore draft text if available
+    final saved = ChatScreen.sessionDrafts[widget.session.id];
+    if (saved != null && saved.isNotEmpty) {
+      _textController.text = saved;
+    }
+    _textController.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    ChatScreen.sessionDrafts[widget.session.id] = _textController.text;
   }
 
   Future<void> _initModelInfo() async {
@@ -367,6 +383,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _sending = true;
       _streaming = true;
       _thinking = true;
+      ChatScreen.streamingSessions.add(widget.session.id);
       _messages.add({'role': 'user', 'content': text});
       // Insert a placeholder streaming message
       _messages.add({'role': 'assistant', 'content': ''});
@@ -416,6 +433,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _streaming = false;
             _sending = false;
           });
+          ChatScreen.streamingSessions.remove(widget.session.id);
           if (_awaitingVoiceReply) {
             _awaitingVoiceReply = false;
             final assistant = messages.reversed.firstWhere(
@@ -432,6 +450,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _streaming = false;
             _sending = false;
           });
+          ChatScreen.streamingSessions.remove(widget.session.id);
         }
       },
       onError: (error) {
@@ -444,6 +463,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _thinking = false;
             _showRetryBanner = true;
           });
+          ChatScreen.streamingSessions.remove(widget.session.id);
           return;
         }
         // Remove the placeholder assistant message
@@ -490,6 +510,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messages.removeLast();
       }
     });
+    ChatScreen.streamingSessions.remove(widget.session.id);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -563,6 +584,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _streaming = false;
                   _thinking = false;
                 });
+                ChatScreen.streamingSessions.remove(widget.session.id);
               },
               tooltip: 'Stop generating',
             )
