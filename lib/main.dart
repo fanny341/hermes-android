@@ -541,7 +541,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                   child: Card(
-                    color: const Color(0xFFD4AF37).withOpacity(0.15),
+                    color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
                     child: ListTile(
                       leading: const Icon(Icons.wifi, color: Color(0xFFD4AF37)),
                       title: const Text('Quick Connect',

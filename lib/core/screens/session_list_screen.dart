@@ -185,6 +185,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
     Session session, String newTitle, BuildContext dialogCtx,
   ) async {
     if (newTitle.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
     try {
       await _client.renameSession(session.id, newTitle);
       if (!context.mounted) return;
@@ -205,13 +206,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
         }
       });
       Navigator.pop(dialogCtx);
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Session renamed')),
       );
     } catch (e) {
       if (!context.mounted) return;
       Navigator.pop(dialogCtx);
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         SnackBar(content: Text('Rename failed: $e')),
       );
     }

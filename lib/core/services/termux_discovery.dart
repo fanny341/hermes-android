@@ -65,7 +65,7 @@ class TermuxDiscovery {
     final local = await _probe('127.0.0.1', _defaultPort, false, candidateKeys);
     if (local != null) {
       results.add(local);
-      seen.add('127.0.0.1:${_defaultPort}');
+      seen.add('127.0.0.1:$_defaultPort');
     }
 
     // 2. Get local IP to determine subnet
