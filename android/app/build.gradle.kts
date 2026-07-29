@@ -46,8 +46,7 @@ android {
 
    buildTypes {
        release {
-           // Always sign with debug keystore (consistent across CI builds)
-           signingConfig = signingConfigs.getByName("debug")
+           // Flutter auto-signs release with debug keystore when no signingConfig is set
            isMinifyEnabled = true
            isShrinkResources = true
            proguardFiles(
