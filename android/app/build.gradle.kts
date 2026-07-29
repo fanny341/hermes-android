@@ -46,9 +46,11 @@ android {
 
    buildTypes {
        release {
-           // Use debug keystore if no release keystore configured
-           if (keystoreProperties.containsKey("storeFile")) {
-               signingConfig = signingConfigs.getByName("release")
+           // Use debug keystore fallback when no release keystore configured
+           signingConfig = if (keystoreProperties.containsKey("storeFile")) {
+               signingConfigs.getByName("release")
+           } else {
+               signingConfigs.getByName("debug")
            }
            isMinifyEnabled = true
            isShrinkResources = true
