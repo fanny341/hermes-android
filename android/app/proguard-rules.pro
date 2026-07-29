@@ -23,3 +23,7 @@
 # Speech recognition & TTS native libs
 -keep class com.speech_to_text.** { *; }
 -keep class com.flutter_tts.** { *; }
+
+# Play Core (required by Flutter's deferred component manager)
+-dontwarn com.google.android.play.core.**
+-keep class com.google.android.play.core.** { *; }
