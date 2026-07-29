@@ -60,6 +60,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Model info from dashboard
   DashboardClient? _dashboardClient;
   int? _modelContextLength;
+  List<String> _availableProviders = [];
+  Map<String, List<Map<String, dynamic>>> _providerModels = {};
+  String _selectedProvider = '';
+  String _selectedModel = '';
+
+  // Plan mode toggle
+  bool _planMode = false;
 
   // Voice input / spoken replies
   final SpeechToText _speechToText = SpeechToText();
@@ -113,14 +120,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       password: widget.connection.dashboardPassword,
     );
     try {
-      final info = await _dashboardClient!.getModelInfo();
+      final results = await Future.wait([
+        _dashboardClient!.getModelInfo(),
+        _dashboardClient!.getModelOptions(),
+      ]);
+      final info = results[0];
+      final options = results[1];
       if (mounted) {
         setState(() {
           _modelContextLength = info['effective_context_length'] as int?;
+          _selectedProvider = (info['provider'] as String?) ?? '';
+          _selectedModel = (info['model'] as String?) ?? '';
+          _parseModelOptions(options);
         });
       }
     } catch (_) {
       // Non-critical — info bar falls back to just the model name
+    }
+  }
+
+  void _parseModelOptions(Map<String, dynamic> options) {
+    final providers = options['providers'] as List<dynamic>? ?? [];
+    _availableProviders = [];
+    _providerModels = {};
+    for (final p in providers) {
+      if (p is! Map<String, dynamic>) continue;
+      final pMap = p;
+      final providerId =
+          (pMap['slug'] as String?) ?? (pMap['id'] as String?) ?? '';
+      final rawModels = pMap['models'] as List<dynamic>? ?? [];
+      if (providerId.isEmpty || rawModels.isEmpty) continue;
+      _availableProviders.add(providerId);
+      _providerModels[providerId] = rawModels
+          .map((m) {
+            if (m is String) return {'id': m, 'name': m};
+            if (m is Map<String, dynamic>) return m;
+            return <String, dynamic>{};
+          })
+          .where((m) => m['id'] != null && (m['id'] as String).isNotEmpty)
+          .toList();
     }
   }
 
@@ -131,6 +169,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.resumed) {
       if (_wasBackgrounded && _streaming) {
         _retryMessage = _lastSentMessage;
+        // Auto-retry immediately without waiting for user tap
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _retryMessage != null) {
+            final msg = _retryMessage!;
+            _retryMessage = null;
+            _textController.text = msg;
+            _sendMessage();
+          }
+        });
       }
       _wasBackgrounded = false;
     }
@@ -146,9 +193,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _speechToText.cancel();
     _flutterTts.stop();
     _client.close();
+    _textController.removeListener(_onTextChanged);
     _textController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
+    ChatScreen.streamingSessions.remove(widget.session.id);
     super.dispose();
   }
 
@@ -374,6 +423,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     // Build conversation history for SSE request
     final history = <Map<String, dynamic>>[];
+    if (_planMode) {
+      history.add({
+        'role': 'system',
+        'content': 'You are in PLAN MODE. Before answering, first create a '
+            'clear step-by-step plan. Think through the problem methodically '
+            'and show your reasoning step by step, then provide the final answer.',
+      });
+    }
     for (var i = _messages.length - 1; i >= 0; i--) {
       final m = _messages[i];
       history.add({'role': m['role'] ?? 'user', 'content': m['content'] ?? ''});
@@ -574,6 +631,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          // Plan mode toggle
+          IconButton(
+            icon: Icon(
+              _planMode ? Icons.psychology : Icons.psychology_outlined,
+              color: _planMode ? const Color(0xFFD4AF37) : null,
+            ),
+            onPressed: () => setState(() => _planMode = !_planMode),
+            tooltip: _planMode ? 'Plan mode ON' : 'Plan mode OFF',
+          ),
           if (_streaming)
             IconButton(
               icon: const Icon(Icons.stop_circle_outlined),
@@ -710,14 +776,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ? '${_modelContextLength! ~/ 1000}K ctx'
         : null;
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => SettingsScreen(connection: widget.connection),
-          ),
-        );
-      },
+      onTap: () => _showModelPicker(context),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
@@ -767,6 +826,122 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
             const Spacer(),
             Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showModelPicker(BuildContext context) {
+    if (_availableProviders.isEmpty) {
+      // Fallback: open Settings if no model data loaded yet
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SettingsScreen(connection: widget.connection),
+        ),
+      );
+      return;
+    }
+    String tempProvider = _selectedProvider;
+    String tempModel = _selectedModel;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDState) => AlertDialog(
+          title: const Text('Change Model'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Provider dropdown
+                DropdownButton<String>(
+                  value: _availableProviders.contains(tempProvider)
+                      ? tempProvider
+                      : (_availableProviders.isNotEmpty
+                          ? _availableProviders.first
+                          : null),
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  hint: const Text('Select provider'),
+                  items: _availableProviders.map((p) {
+                    return DropdownMenuItem(value: p, child: Text(p));
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      setDState(() {
+                        tempProvider = val;
+                        final models = _providerModels[val] ?? [];
+                        if (models.isNotEmpty) {
+                          tempModel = models.first['id'] as String;
+                        }
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                // Model dropdown
+                DropdownButton<String>(
+                  value: _providerModels[tempProvider]
+                          ?.any((m) => m['id'] == tempModel) ==
+                      true
+                      ? tempModel
+                      : null,
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  hint: const Text('Select model'),
+                  items: (_providerModels[tempProvider] ?? [])
+                      .map((m) => DropdownMenuItem(
+                            value: m['id'] as String,
+                            child: Text(m['name'] as String? ?? m['id'] as String),
+                          ))
+                      .toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      setDState(() => tempModel = val);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                if (tempProvider.isEmpty || tempModel.isEmpty) return;
+                final dialogCtx = context;
+                try {
+                  await _dashboardClient!.setModel(
+                    'session',
+                    tempProvider,
+                    tempModel,
+                  );
+                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                  // Update local state
+                  if (mounted) {
+                    setState(() {
+                      _selectedProvider = tempProvider;
+                      _selectedModel = tempModel;
+                      // Also refresh model info
+                      _initModelInfo();
+                    });
+                  }
+                } catch (e) {
+                  if (dialogCtx.mounted) {
+                    ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                      SnackBar(content: Text('Failed: $e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('APPLY'),
+            ),
           ],
         ),
       ),
