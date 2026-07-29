@@ -49,3 +49,5 @@ app.*.map.json
 # Local keystore properties
 /key.properties
 /release.keystore
+# Ignore stray artifact files
+android/app/*..@@*
