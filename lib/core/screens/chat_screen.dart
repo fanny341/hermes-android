@@ -2,6 +2,7 @@
 // Uses REST endpoints: POST /api/sessions/{id}/chat and
 // GET /api/sessions/{id}/messages.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,19 +30,25 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
   final List<Map<String, dynamic>> _toolMessages = [];
   bool _loading = true;
   String? _error;
   late final ApiClient _client;
-  late final GatewayChatClient _gateway;
 
   // Chat sending state
   final _textController = TextEditingController();
   bool _sending = false;
   bool _streaming = false;
   bool _thinking = false; // true while waiting for first token
+  GatewayChatClient? _activeChatClient;
+
+  // Background reconnect
+  bool _wasBackgrounded = false;
+  String? _retryMessage;
+  bool _showRetryBanner = false;
+  String? _lastSentMessage;
 
   // Voice input / spoken replies
   final SpeechToText _speechToText = SpeechToText();
@@ -58,9 +65,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
   // Scroll management
   final _scrollController = ScrollController();
-  bool _showScrollToBottom = false;
-  double _lastPixels = 0;
-  static final Map<String, double> _savedPositions = {};
 
   @override
   void initState() {
@@ -70,11 +74,22 @@ class _ChatScreenState extends State<ChatScreen> {
       apiKey: widget.connection.apiKey,
       pathPrefix: widget.connection.gatewayPrefix ?? '',
     );
-    _gateway = GatewayChatClient(_client);
     _fetchMessages();
     _loadVerboseMode();
     _initVoice();
-    _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _wasBackgrounded = true;
+    } else if (state == AppLifecycleState.resumed) {
+      if (_wasBackgrounded && _streaming) {
+        _retryMessage = _lastSentMessage;
+      }
+      _wasBackgrounded = false;
+    }
   }
 
   Future<void> _loadVerboseMode() async {
@@ -84,12 +99,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
-    _savedPositions[widget.session.id] = _lastPixels;
     _speechToText.cancel();
     _flutterTts.stop();
     _client.close();
     _textController.dispose();
-    _scrollController.removeListener(_onScroll);
+    WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     super.dispose();
   }
@@ -216,27 +230,6 @@ class _ChatScreenState extends State<ChatScreen> {
     await _flutterTts.speak(spokenText);
   }
 
-  void _onScroll() {
-    if (_scrollController.hasClients) {
-      _lastPixels = _scrollController.position.pixels;
-    }
-    final atBottom =
-        _scrollController.hasClients &&
-        _scrollController.position.pixels >=
-            _scrollController.position.maxScrollExtent - 200;
-    if (atBottom != !_showScrollToBottom && _streaming) {
-      setState(() => _showScrollToBottom = !atBottom);
-    }
-  }
-
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(
-        _scrollController.position.maxScrollExtent,
-      );
-    }
-  }
-
   Future<void> _fetchMessages() async {
     setState(() {
       _loading = true;
@@ -251,24 +244,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages = messages;
         _loading = false;
       });
-      final saved = _savedPositions[widget.session.id];
-      if (saved != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.jumpTo(
-              saved.clamp(0.0, _scrollController.position.maxScrollExtent),
-            );
-          }
-        });
-      } else {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.jumpTo(
-              _scrollController.position.maxScrollExtent,
-            );
-          }
-        });
-      }
     } catch (e) {
       if (!mounted) return;
       final errStr = e.toString();
@@ -350,6 +325,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_sending || _streaming) return;
 
     _textController.text = '';
+    _lastSentMessage = text;
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
 
     // Build conversation history for SSE request
@@ -363,16 +339,25 @@ class _ChatScreenState extends State<ChatScreen> {
       _sending = true;
       _streaming = true;
       _thinking = true;
-      _showScrollToBottom = false;
       _messages.add({'role': 'user', 'content': text});
       // Insert a placeholder streaming message
       _messages.add({'role': 'assistant', 'content': ''});
+      // Cap message history to prevent memory bloat
+      if (_messages.length > 200) {
+        final systemMsgs = _messages.where((m) => m['role'] == 'system').toList();
+        final recentMsgs = _messages.reversed
+            .take(200 - systemMsgs.length)
+            .toList()
+            .reversed
+            .toList();
+        _messages = [...systemMsgs, ...recentMsgs];
+      }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
-
     // Accumulate tokens into the streaming placeholder
-    await _gateway.sendMessageStreaming(
+    final client = GatewayChatClient(_client);
+    _activeChatClient = client;
+    await client.sendMessageStreaming(
       message: text,
       sessionId: widget.session.id,
       history: history,
@@ -383,14 +368,6 @@ class _ChatScreenState extends State<ChatScreen> {
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
             _messages.last['content'] =
                 (_messages.last['content'] as String) + token;
-          }
-        });
-        // Auto-scroll during streaming if user is near the bottom
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients &&
-              _scrollController.position.pixels >=
-                  _scrollController.position.maxScrollExtent - 250) {
-            _scrollToBottom();
           }
         });
       },
@@ -410,11 +387,6 @@ class _ChatScreenState extends State<ChatScreen> {
             _messages = messages;
             _streaming = false;
             _sending = false;
-            _showScrollToBottom = false;
-          });
-          // Always scroll to bottom after receiving final messages
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _scrollToBottom();
           });
           if (_awaitingVoiceReply) {
             _awaitingVoiceReply = false;
@@ -436,6 +408,16 @@ class _ChatScreenState extends State<ChatScreen> {
       },
       onError: (error) {
         if (!mounted) return;
+        // If the stream was lost due to app backgrounding, show retry
+        if (_retryMessage != null) {
+          setState(() {
+            _streaming = false;
+            _sending = false;
+            _thinking = false;
+            _showRetryBanner = true;
+          });
+          return;
+        }
         // Remove the placeholder assistant message
         setState(() {
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
@@ -445,6 +427,27 @@ class _ChatScreenState extends State<ChatScreen> {
         _handleSendError(text, error);
       },
     );
+  }
+
+  void _regenerateLast() {
+    if (_messages.isEmpty || _streaming) return;
+    // Find the last user message
+    Map<String, dynamic>? lastUserMsg;
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i]['role'] == 'user') {
+        lastUserMsg = _messages[i];
+        break;
+      }
+    }
+    if (lastUserMsg == null) return;
+    // Remove the last assistant message (if any)
+    if (_messages.last['role'] == 'assistant') {
+      setState(() => _messages.removeLast());
+    }
+    // Re-send from the last user message
+    final text = messageContentToText(lastUserMsg['content']);
+    _textController.text = text;
+    _sendMessage();
   }
 
   void _handleSendError(String text, Object e) {
@@ -504,8 +507,6 @@ class _ChatScreenState extends State<ChatScreen> {
         _toolMessages.add(payload);
       }
     });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   @override
@@ -525,23 +526,17 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           if (_streaming)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _thinking ? 'Thinking…' : 'Responding…',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ],
-              ),
+            IconButton(
+              icon: const Icon(Icons.stop_circle_outlined),
+              onPressed: () {
+                _activeChatClient?.abort();
+                setState(() {
+                  _sending = false;
+                  _streaming = false;
+                  _thinking = false;
+                });
+              },
+              tooltip: 'Stop generating',
             )
           else
             IconButton(
@@ -584,6 +579,39 @@ class _ChatScreenState extends State<ChatScreen> {
               minHeight: 2,
               backgroundColor: Colors.transparent,
             ),
+          // Retry banner when connection was lost due to backgrounding
+          if (_showRetryBanner)
+            MaterialBanner(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              backgroundColor: Colors.orange.shade50,
+              leading: const Icon(Icons.wifi_off, color: Colors.orange),
+              content: const Text('Connection was interrupted.'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    setState(() => _showRetryBanner = false);
+                    if (_retryMessage != null) {
+                      final msg = _retryMessage!;
+                      _retryMessage = null;
+                      _textController.text = msg;
+                      _sendMessage();
+                    }
+                  },
+                  child: const Text('RETRY'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _showRetryBanner = false;
+                      _retryMessage = null;
+                    });
+                  },
+                  child: const Text('DISMISS'),
+                ),
+              ],
+            ),
+          // Session info bar
+          _buildSessionInfoBar(),
           Expanded(
             child: Center(
               child: ConstrainedBox(
@@ -615,6 +643,44 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSessionInfoBar() {
+    final model = widget.session.model;
+    final msgCount = _messages.length;
+    final tokens = _messages.fold<int>(0, (sum, m) {
+      final c = m['content'];
+      if (c is String) return sum + c.length ~/ 4;
+      return sum;
+    });
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.model_training, size: 13, color: Colors.grey.shade600),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              model,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Icon(Icons.message, size: 13, color: Colors.grey.shade600),
+          const SizedBox(width: 4),
+          Text('$msgCount', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+          const SizedBox(width: 12),
+          Icon(Icons.token, size: 13, color: Colors.grey.shade600),
+          const SizedBox(width: 4),
+          Text('~${tokens}k', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
         ],
       ),
     );
@@ -773,12 +839,16 @@ class _ChatScreenState extends State<ChatScreen> {
       displayMessages.add(toolQueue.toList());
     }
 
+    // Reverse for ListView.reverse: true — newest items at index 0 (bottom)
+    final reversed = displayMessages.reversed.toList();
+
     return ListView.builder(
+      reverse: true,
       controller: _scrollController,
       padding: const EdgeInsets.only(bottom: 4),
-      itemCount: displayMessages.length,
+      itemCount: reversed.length,
       itemBuilder: (context, index) {
-        final item = displayMessages[index];
+        final item = reversed[index];
 
         if (item is String && item == '__thinking__') {
           return _buildThinkingIndicator();
@@ -794,12 +864,34 @@ class _ChatScreenState extends State<ChatScreen> {
             (msg['_display_content'] as String?) ??
             stripToolResultText(messageContentToText(msg['content']));
         final isUser = role == 'user';
+        final isLastAssistant = index == 0 && role == 'assistant' && !_streaming;
 
-        return _MessageBubble(
-          content: content,
-          isUser: isUser,
-          verbose: _verboseMode,
-          metadata: msg,
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _MessageBubble(
+              content: content,
+              isUser: isUser,
+              verbose: _verboseMode,
+              metadata: msg,
+            ),
+            // Regenerate button below the last assistant message
+            if (isLastAssistant)
+              Padding(
+                padding: const EdgeInsets.only(left: 16, top: 2, bottom: 4),
+                child: TextButton.icon(
+                  onPressed: _regenerateLast,
+                  icon: const Icon(Icons.refresh, size: 14),
+                  label: const Text('Regenerate', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
@@ -987,7 +1079,20 @@ class _MessageBubble extends StatelessWidget {
           ? MainAxisAlignment.end
           : MainAxisAlignment.start,
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [bubble],
+      children: [
+        GestureDetector(
+          onLongPress: () {
+            Clipboard.setData(ClipboardData(text: content));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Message copied'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          },
+          child: bubble,
+        ),
+      ],
     );
   }
 }

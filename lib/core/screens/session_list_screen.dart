@@ -21,11 +21,14 @@ class SessionListScreen extends StatefulWidget {
 class _SessionListScreenState extends State<SessionListScreen> {
   late final ApiClient _client;
   List<Session> _sessions = [];
+  List<Session> _filteredSessions = [];
   bool _loading = true;
   String? _error;
   bool _healthOk = false;
   final Set<String> _deletingSessionIds = {};
   Session? _selectedSession; // for master-detail layout
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -47,6 +50,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
   @override
   void dispose() {
     _client.close();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -67,6 +71,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       setState(() {
         _sessions = filtered;
         _loading = false;
+        _applyFilter();
       });
     } catch (e) {
       if (!mounted) return;
@@ -259,6 +264,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       setState(() {
         _sessions.removeWhere((item) => item.id == session.id);
         _deletingSessionIds.remove(session.id);
+        _applyFilter();
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Session deleted from remote Hermes.')),
@@ -301,6 +307,17 @@ class _SessionListScreenState extends State<SessionListScreen> {
       return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     }
     return '${dt.day}/${dt.month}';
+  }
+
+  void _applyFilter() {
+    final query = _searchQuery.toLowerCase().trim();
+    if (query.isEmpty) {
+      _filteredSessions = List.from(_sessions);
+    } else {
+      _filteredSessions = _sessions
+          .where((s) => s.title.toLowerCase().contains(query))
+          .toList();
+    }
   }
 
   void _openScreen(Widget screen) {
@@ -526,13 +543,50 @@ class _SessionListScreenState extends State<SessionListScreen> {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _fetchSessions,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _sessions.length,
-        itemBuilder: (context, index) {
-          final session = _sessions[index];
+    return Column(
+      children: [
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search sessions…',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchQuery = '';
+                          _applyFilter();
+                        });
+                      },
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              isDense: true,
+            ),
+            onChanged: (value) {
+              setState(() {
+                _searchQuery = value;
+                _applyFilter();
+              });
+            },
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _fetchSessions,
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _filteredSessions.length,
+              itemBuilder: (context, index) {
+                final session = _filteredSessions[index];
           final isDeleting = _deletingSessionIds.contains(session.id);
           return Card(
             margin: const EdgeInsets.only(bottom: 8),
@@ -600,6 +654,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
           );
         },
       ),
-    );
+    ),
+    ),
+  ],
+);
   }
 }

@@ -351,6 +351,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // ---- Section: About ----
         _buildSectionHeader('About'),
         _AboutCard(),
+
+        const SizedBox(height: 16),
+
+        // ---- Section: Clear Local Data ----
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.delete_sweep, color: Colors.red),
+            title: const Text('Clear Local Cache'),
+            subtitle: const Text(
+              'Reset all app preferences (login, voice, theme)',
+              style: TextStyle(fontSize: 12),
+            ),
+            onTap: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Clear Local Cache?'),
+                  content: const Text(
+                    'This will reset all app preferences including saved connection, '
+                    'voice settings, and theme. You will need to reconfigure the app.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(ctx).colorScheme.error,
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Clear'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true) {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.clear();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Local cache cleared'),
+                    ),
+                  );
+                }
+              }
+            },
+          ),
+        ),
       ],
     );
   }

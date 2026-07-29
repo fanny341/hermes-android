@@ -189,10 +189,9 @@ class ApiClient {
   // ── Session listing ──────────────────────────────────────────────────
 
   Future<List<Session>> getSessions() async {
-    final res = await _http.get(
-      Uri.parse('$baseUrl/api/sessions'),
-      headers: _headers,
-    );
+    final res = await _http
+        .get(Uri.parse('$baseUrl/api/sessions'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) {
       throw Exception('HTTP ${res.statusCode}: ${res.body}');
     }
@@ -207,10 +206,12 @@ class ApiClient {
   // ── Messages ─────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> getMessages(String sessionId) async {
-    final res = await _http.get(
-      Uri.parse('$baseUrl/api/sessions/$sessionId/messages'),
-      headers: _headers,
-    );
+    final res = await _http
+        .get(
+          Uri.parse('$baseUrl/api/sessions/$sessionId/messages'),
+          headers: _headers,
+        )
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) {
       throw Exception('HTTP ${res.statusCode}: ${res.body}');
     }
@@ -221,10 +222,9 @@ class ApiClient {
 
   Future<void> deleteSession(String sessionId) async {
     final encodedId = Uri.encodeComponent(sessionId);
-    final res = await _http.delete(
-      Uri.parse('$baseUrl/api/sessions/$encodedId'),
-      headers: _headers,
-    );
+    final res = await _http
+        .delete(Uri.parse('$baseUrl/api/sessions/$encodedId'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
     // Treat a stale local row as already synced: the remote no longer has it,
     // so the UI can safely remove it from history.
     if (res.statusCode == 404) return;
@@ -236,10 +236,9 @@ class ApiClient {
   // ── Models ───────────────────────────────────────────────────────────
 
   Future<List<String>> getModels() async {
-    final res = await _http.get(
-      Uri.parse('$baseUrl/v1/models'),
-      headers: _headers,
-    );
+    final res = await _http
+        .get(Uri.parse('$baseUrl/v1/models'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) {
       return ['hermes-agent'];
     }
@@ -276,19 +275,17 @@ class ApiClient {
   // ── Generic HTTP helpers (for Dashboard API compatibility) ────────────
 
   Future<Map<String, dynamic>> apiGet(String endpoint) async {
-    final res = await _http.get(
-      Uri.parse('$baseUrl/$endpoint'),
-      headers: _headers,
-    );
+    final res = await _http
+        .get(Uri.parse('$baseUrl/$endpoint'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<dynamic>> apiGetList(String endpoint) async {
-    final res = await _http.get(
-      Uri.parse('$baseUrl/$endpoint'),
-      headers: _headers,
-    );
+    final res = await _http
+        .get(Uri.parse('$baseUrl/$endpoint'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
     return jsonDecode(res.body) as List<dynamic>;
   }
@@ -297,11 +294,13 @@ class ApiClient {
     String endpoint, {
     Map<String, dynamic>? body,
   }) async {
-    final res = await _http.post(
-      Uri.parse('$baseUrl/$endpoint'),
-      headers: _headers,
-      body: body != null ? jsonEncode(body) : null,
-    );
+    final res = await _http
+        .post(
+          Uri.parse('$baseUrl/$endpoint'),
+          headers: _headers,
+          body: body != null ? jsonEncode(body) : null,
+        )
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('HTTP ${res.statusCode}');
     }
@@ -309,10 +308,9 @@ class ApiClient {
   }
 
   Future<void> apiDelete(String endpoint) async {
-    final res = await _http.delete(
-      Uri.parse('$baseUrl/$endpoint'),
-      headers: _headers,
-    );
+    final res = await _http
+        .delete(Uri.parse('$baseUrl/$endpoint'), headers: _headers)
+        .timeout(const Duration(seconds: 15));
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('HTTP ${res.statusCode}');
     }

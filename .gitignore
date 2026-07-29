@@ -52,3 +52,5 @@ app.*.map.json
 /release.keystore
 # Ignore stray artifact files
 android/app/*..@@*
+# Hermes plans (local planning artifacts)
+.hermes/plans/
