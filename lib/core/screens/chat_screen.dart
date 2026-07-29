@@ -41,6 +41,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _textController = TextEditingController();
   bool _sending = false;
   bool _streaming = false;
+  bool _thinking = false; // true while waiting for first token
 
   // Voice input / spoken replies
   final SpeechToText _speechToText = SpeechToText();
@@ -363,6 +364,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _sending = true;
       _streaming = true;
+      _thinking = true;
       _showScrollToBottom = false;
       _messages.add({'role': 'user', 'content': text});
       // Insert a placeholder streaming message
@@ -379,6 +381,7 @@ class _ChatScreenState extends State<ChatScreen> {
       onToken: (token) {
         if (!mounted) return;
         setState(() {
+          _thinking = false;
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
             _messages.last['content'] =
                 (_messages.last['content'] as String) + token;
@@ -391,6 +394,7 @@ class _ChatScreenState extends State<ChatScreen> {
       },
       onDone: () async {
         if (!mounted) return;
+        setState(() => _thinking = false);
         // Refresh messages to get the final server-side state
         try {
           final messages = await _client.getMessages(widget.session.id);
@@ -455,7 +459,8 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _sending = false;
       _streaming = false;
-      _awaitingVoiceReply = false;
+      _thinking = false;
+      _error = 'Send failed: $e';
       if (_messages.isNotEmpty &&
           _messages.last['role'] == 'user' &&
           _messages.last['content'] == text) {
@@ -528,17 +533,21 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         actions: [
           if (_streaming)
-            const Padding(
-              padding: EdgeInsets.only(right: 8),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  SizedBox(
+                  const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  SizedBox(width: 8),
-                  Text('Responding…', style: TextStyle(fontSize: 13)),
+                  const SizedBox(width: 8),
+                  Text(
+                    _thinking ? 'Thinking…' : 'Responding…',
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ],
               ),
             )
@@ -548,6 +557,31 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: _loading ? null : _fetchMessages,
               tooltip: 'Refresh',
             ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              if (value == 'verbose') {
+                final prefs = await SharedPreferences.getInstance();
+                final newVal = !_verboseMode;
+                await prefs.setBool('verbose_mode', newVal);
+                setState(() => _verboseMode = newVal);
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'verbose',
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: _verboseMode,
+                      onChanged: null,
+                    ),
+                    const Text('Debug metadata'),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: Column(
@@ -566,7 +600,23 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
                 child: Column(
                   children: [
-                    Expanded(child: _buildBody()),
+                    // Inline error banner for send errors (messages still visible)
+                    if (_error != null && _messages.isNotEmpty)
+                      MaterialBanner(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        leading: const Icon(Icons.warning_amber, color: Colors.orange),
+                        content: Text(_error!, style: const TextStyle(fontSize: 13)),
+                        backgroundColor: Colors.orange.withValues(alpha: 0.12),
+                        actions: [
+                          TextButton(
+                            onPressed: () => setState(() => _error = null),
+                            child: const Text('DISMISS'),
+                          ),
+                        ],
+                      ),
+                    Expanded(
+                      child: _buildBody(),
+                    ),
                     _buildInputBar(),
                   ],
                 ),
@@ -707,7 +757,8 @@ class _ChatScreenState extends State<ChatScreen> {
       }
       if (role != 'user' && role != 'assistant') continue;
       final content = stripToolResultText(messageContentToText(msg['content']));
-      if (content.isEmpty) continue;
+      // Keep empty assistant messages when thinking (streaming placeholder)
+      if (content.isEmpty && !(role == 'assistant' && _thinking)) continue;
 
       if (currentGroup.isNotEmpty) {
         displayMessages.add(currentGroup.toList());
@@ -717,6 +768,11 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     if (currentGroup.isNotEmpty) {
       displayMessages.add(currentGroup.toList());
+    }
+
+    // Show thinking indicator if streaming but no content yet
+    if (_thinking) {
+      displayMessages.add('__thinking__');
     }
 
     // Tools from SSE events that arrived during streaming but haven't been
@@ -731,6 +787,10 @@ class _ChatScreenState extends State<ChatScreen> {
       itemCount: displayMessages.length,
       itemBuilder: (context, index) {
         final item = displayMessages[index];
+
+        if (item is String && item == '__thinking__') {
+          return _buildThinkingIndicator();
+        }
 
         if (item is List<Map<String, dynamic>>) {
           return _ToolProgressCard(items: item, verbose: _verboseMode);
@@ -750,6 +810,34 @@ class _ChatScreenState extends State<ChatScreen> {
           metadata: msg,
         );
       },
+    );
+  }
+
+  /// Animated thinking indicator shown while waiting for the first token.
+  Widget _buildThinkingIndicator() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            'Thinking…',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
