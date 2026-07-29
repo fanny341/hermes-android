@@ -1,0 +1,55 @@
+name: moritzu_hermes
+description: "Moritzu Hermes — chat with your agent via a phone or tablet."
+publish_to: 'none'
+version: 1.0.13+113
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI
+  cupertino_icons: ^1.0.8
+  flutter_markdown: ^0.7.6
+  google_fonts: ^6.2.1
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Navigation
+  go_router: ^14.0.0
+
+  # Network
+  http: ^1.2.0
+  web_socket_channel: ^3.0.0
+
+  # Local storage
+  shared_preferences: ^2.3.0
+  path_provider: ^2.1.5
+
+  # Data models
+  json_annotation: ^4.9.0
+  uuid: ^4.5.1
+
+  # Misc
+  url_launcher: ^6.3.0
+  package_info_plus: ^8.0.0
+
+  # Markdown syntax highlighting
+  highlight: ^0.7.0
+  speech_to_text: ^7.4.0
+  flutter_tts: ^4.2.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.14
+  json_serializable: ^6.9.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
