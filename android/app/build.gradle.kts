@@ -46,12 +46,8 @@ android {
 
    buildTypes {
        release {
-           // Use debug keystore fallback when no release keystore configured
-           signingConfig = if (keystoreProperties.containsKey("storeFile")) {
-               signingConfigs.getByName("release")
-           } else {
-               signingConfigs.getByName("debug")
-           }
+           // Always sign with debug keystore (consistent across CI builds)
+           signingConfig = signingConfigs.getByName("debug")
            isMinifyEnabled = true
            isShrinkResources = true
            proguardFiles(
