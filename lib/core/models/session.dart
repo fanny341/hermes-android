@@ -6,6 +6,7 @@ class Session {
   final String source;
   final int messageCount;
   final bool isActive;
+  final bool isRunning;
   final String preview;
   final double startedAt;
   final double? endedAt;
@@ -17,6 +18,7 @@ class Session {
     required this.source,
     required this.messageCount,
     required this.isActive,
+    required this.isRunning,
     required this.preview,
     required this.startedAt,
     this.endedAt,
@@ -31,6 +33,7 @@ class Session {
       source: json['source'] ?? '',
       messageCount: json['message_count'] ?? 0,
       isActive: endedAt == null,
+      isRunning: json['is_running'] ?? false,
       preview: json['preview'] ?? '',
       startedAt: (json['started_at'] ?? 0).toDouble(),
       endedAt: endedAt?.toDouble(),

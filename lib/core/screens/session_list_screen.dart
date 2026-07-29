@@ -199,6 +199,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
             source: session.source,
             messageCount: session.messageCount,
             isActive: session.isActive,
+            isRunning: session.isRunning,
             preview: session.preview,
             startedAt: session.startedAt,
             endedAt: session.endedAt,
@@ -231,6 +232,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
           source: session.source,
           messageCount: 0,
           isActive: true,
+          isRunning: false,
           preview: 'Forked from ${session.title}',
           startedAt: DateTime.now().millisecondsSinceEpoch / 1000.0,
         );
@@ -279,6 +281,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       source: 'mobile',
       messageCount: 0,
       isActive: true,
+      isRunning: false,
       preview: '',
       startedAt: DateTime.now().millisecondsSinceEpoch.toDouble() / 1000,
     );
