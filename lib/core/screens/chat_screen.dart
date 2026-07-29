@@ -192,11 +192,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     _speechToText.cancel();
     _flutterTts.stop();
-    _client.close();
+    // Abort any active SSE stream cleanly (saves partial response on server)
+    _activeChatClient?.abort();
+    _activeChatClient = null;
     _textController.removeListener(_onTextChanged);
     _textController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
+    _client.close();
     ChatScreen.streamingSessions.remove(widget.session.id);
     super.dispose();
   }
@@ -772,60 +775,100 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (c is String) return sum + c.length ~/ 4;
       return sum;
     });
-    final ctxLabel = _modelContextLength != null
-        ? '${_modelContextLength! ~/ 1000}K ctx'
-        : null;
+    final ctxLimit = _modelContextLength;
+    final ctxLabel = ctxLimit != null ? '${ctxLimit ~/ 1000}K ctx' : '--K ctx';
+    final ctxPct = ctxLimit != null && ctxLimit > 0
+        ? (tokens / ctxLimit).clamp(0.0, 1.0)
+        : 0.0;
+    Color barColor;
+    if (ctxPct < 0.5) {
+      barColor = Colors.green;
+    } else if (ctxPct < 0.75) {
+      barColor = Colors.orange;
+    } else {
+      barColor = Colors.red;
+    }
+
     return GestureDetector(
       onTap: () => _showModelPicker(context),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.grey.shade100,
           border: Border(
             top: BorderSide(color: Colors.grey.shade300),
           ),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.model_training, size: 13, color: Colors.grey.shade600),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                model,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                overflow: TextOverflow.ellipsis,
-              ),
+            Row(
+              children: [
+                Icon(Icons.model_training, size: 13, color: Colors.grey.shade600),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    model,
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (ctxLimit != null) ...[
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      ctxLabel,
+                      style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 12),
+                Icon(Icons.message, size: 13, color: Colors.grey.shade600),
+                const SizedBox(width: 4),
+                Text('$msgCount',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+                const SizedBox(width: 12),
+                Icon(Icons.token, size: 13, color: Colors.grey.shade600),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    '~${tokens}k',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Spacer(),
+                Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
+              ],
             ),
-            if (ctxLabel != null) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  ctxLabel,
-                  style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
-                ),
+            if (ctxLimit != null) ...[
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: LinearProgressIndicator(
+                        value: ctxPct,
+                        minHeight: 4,
+                        backgroundColor: Colors.grey.shade300,
+                        valueColor: AlwaysStoppedAnimation<Color>(barColor),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${(ctxPct * 100).toInt()}%',
+                    style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
+                  ),
+                ],
               ),
             ],
-            const SizedBox(width: 12),
-            Icon(Icons.message, size: 13, color: Colors.grey.shade600),
-            const SizedBox(width: 4),
-            Text('$msgCount', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-            const SizedBox(width: 12),
-            Icon(Icons.token, size: 13, color: Colors.grey.shade600),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                '~${tokens}k',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const Spacer(),
-            Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
           ],
         ),
       ),
