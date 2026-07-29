@@ -46,7 +46,8 @@ android {
 
    buildTypes {
        release {
-           // Flutter auto-signs release with debug keystore when no signingConfig is set
+           // Sign with the keystore from key.properties (generated on CI)
+           signingConfig = signingConfigs.getByName("release")
            isMinifyEnabled = true
            isShrinkResources = true
            proguardFiles(

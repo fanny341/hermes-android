@@ -30,6 +30,21 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate debug keystore
+        run: |
+          # Generate keystore in android/ (Gradle resolves file() relative to project dir)
+          keytool -genkey -v -keystore android/debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Android Debug, OU=Android, O=Google, L=Mountain View, ST=CA, C=US"
+          # key.properties must be at project root (parent of android/)
+          echo "storeFile=debug.keystore" > key.properties
+          echo "storePassword=android" >> key.properties
+          echo "keyAlias=androiddebugkey" >> key.properties
+          echo "keyPassword=android" >> key.properties
+          cat key.properties
+
       - name: Analyze
         run: flutter analyze
 
