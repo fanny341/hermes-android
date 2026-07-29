@@ -28,6 +28,9 @@ android {
        targetSdk = 36
        versionCode = flutter.versionCode
        versionName = flutter.versionName
+       ndk {
+           abiFilters += listOf("arm64-v8a")
+       }
    }
 
    signingConfigs {
@@ -53,15 +56,6 @@ android {
                getDefaultProguardFile("proguard-android-optimize.txt"),
                "proguard-rules.pro"
            )
-       }
-   }
-
-   splits {
-       abi {
-           isEnable = true
-           reset()
-           include("arm64-v8a")
-           isUniversalApk = false
        }
    }
 }

@@ -49,5 +49,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: moritzu-hermes-v${{ steps.version.outputs.apk_version }}
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
