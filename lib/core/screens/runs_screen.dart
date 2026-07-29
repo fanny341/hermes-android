@@ -16,17 +16,14 @@ class RunsScreen extends StatefulWidget {
 class _RunEntry {
   final String runId;
   final String prompt;
-  String status;
+  String status = 'started';
   String? output;
   String? error;
-  DateTime startedAt;
+  final DateTime startedAt;
 
   _RunEntry({
     required this.runId,
     required this.prompt,
-    this.status = 'started',
-    this.output,
-    this.error,
     required this.startedAt,
   });
 }

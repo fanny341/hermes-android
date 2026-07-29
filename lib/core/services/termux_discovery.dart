@@ -152,10 +152,10 @@ class TermuxDiscovery {
       }
 
       // Confirm it's Hermes
-      final platform = health?['platform']?.toString() ?? '';
+      final platform = health['platform']?.toString() ?? '';
       if (!platform.contains('hermes')) return null;
 
-      final version = health?['version']?.toString() ?? 'unknown';
+      final version = health['version']?.toString() ?? 'unknown';
 
       // Try candidate keys to find a working one
       String? workingKey;
