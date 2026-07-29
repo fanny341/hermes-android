@@ -11,6 +11,7 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import '../services/connection_manager.dart';
+import 'settings_screen.dart';
 import '../utils/message_content.dart';
 import '../utils/responsive.dart';
 
@@ -50,6 +51,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _showRetryBanner = false;
   String? _lastSentMessage;
 
+  // Model info from dashboard
+  DashboardClient? _dashboardClient;
+  int? _modelContextLength;
+
   // Voice input / spoken replies
   final SpeechToText _speechToText = SpeechToText();
   final FlutterTts _flutterTts = FlutterTts();
@@ -78,6 +83,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadVerboseMode();
     _initVoice();
     WidgetsBinding.instance.addObserver(this);
+    _initModelInfo();
+  }
+
+  Future<void> _initModelInfo() async {
+    _dashboardClient = DashboardClient(
+      host: widget.connection.host,
+      port: widget.connection.dashboardPort,
+      pathPrefix: widget.connection.dashboardPrefix ?? '',
+      proxied: widget.connection.dashboardProxied,
+      useHttps: widget.connection.useHttps,
+      username: widget.connection.dashboardUsername,
+      password: widget.connection.dashboardPassword,
+    );
+    try {
+      final info = await _dashboardClient!.getModelInfo();
+      if (mounted) {
+        setState(() {
+          _modelContextLength = info['effective_context_length'] as int?;
+        });
+      }
+    } catch (_) {
+      // Non-critical — info bar falls back to just the model name
+    }
   }
 
   @override
@@ -610,8 +638,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ],
             ),
-          // Session info bar
-          _buildSessionInfoBar(),
           Expanded(
             child: Center(
               child: ConstrainedBox(
@@ -634,10 +660,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           ),
                         ],
                       ),
-                    Expanded(
+                      Expanded(
                       child: _buildBody(),
-                    ),
-                    _buildInputBar(),
+                      ),
+                      // Session info bar — above input, always visible while typing
+                      _buildSessionInfoBar(),
+                      _buildInputBar(),
                   ],
                 ),
               ),
@@ -656,32 +684,69 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (c is String) return sum + c.length ~/ 4;
       return sum;
     });
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.model_training, size: 13, color: Colors.grey.shade600),
-          const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              model,
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-              overflow: TextOverflow.ellipsis,
-            ),
+    final ctxLabel = _modelContextLength != null
+        ? '${_modelContextLength! ~/ 1000}K ctx'
+        : null;
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SettingsScreen(connection: widget.connection),
           ),
-          const SizedBox(width: 12),
-          Icon(Icons.message, size: 13, color: Colors.grey.shade600),
-          const SizedBox(width: 4),
-          Text('$msgCount', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-          const SizedBox(width: 12),
-          Icon(Icons.token, size: 13, color: Colors.grey.shade600),
-          const SizedBox(width: 4),
-          Text('~${tokens}k', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-        ],
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          border: Border(
+            top: BorderSide(color: Colors.grey.shade300),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.model_training, size: 13, color: Colors.grey.shade600),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                model,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (ctxLabel != null) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  ctxLabel,
+                  style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
+                ),
+              ),
+            ],
+            const SizedBox(width: 12),
+            Icon(Icons.message, size: 13, color: Colors.grey.shade600),
+            const SizedBox(width: 4),
+            Text('$msgCount', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            const SizedBox(width: 12),
+            Icon(Icons.token, size: 13, color: Colors.grey.shade600),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '~${tokens}k',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
+          ],
+        ),
       ),
     );
   }
