@@ -32,8 +32,8 @@ jobs:
 
       - name: Generate debug keystore
         run: |
-          # Generate keystore in android/ (Gradle resolves file() relative to project dir)
-          keytool -genkey -v -keystore android/debug.keystore \
+          # Generate keystore in android/app/ (Gradle resolves file() relative to app module dir)
+          keytool -genkey -v -keystore android/app/debug.keystore \
             -alias androiddebugkey \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass android -keypass android \
