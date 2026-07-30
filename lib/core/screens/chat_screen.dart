@@ -770,7 +770,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildSessionInfoBar() {
-    final model = widget.session.model;
+    // Show newly selected model if set, otherwise fall back to session default
+    final model = _selectedModel.isNotEmpty ? _selectedModel : widget.session.model;
     final msgCount = _messages.length;
     final tokens = _messages.fold<int>(0, (sum, m) {
       final c = m['content'];
@@ -778,99 +779,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return sum;
     });
     final ctxLimit = _modelContextLength;
-    final ctxLabel = ctxLimit != null ? '${ctxLimit ~/ 1000}K ctx' : '--K ctx';
-    final ctxPct = ctxLimit != null && ctxLimit > 0
-        ? (tokens / ctxLimit).clamp(0.0, 1.0)
-        : 0.0;
-    Color barColor;
-    if (ctxPct < 0.5) {
-      barColor = Colors.green;
-    } else if (ctxPct < 0.75) {
-      barColor = Colors.orange;
-    } else {
-      barColor = Colors.red;
-    }
+    final ctxText = ctxLimit != null
+        ? '~${tokens}k / ${ctxLimit ~/ 1000}K'
+        : '~${tokens}k';
+
+    // Respect the app's text color (dark/light theme)
+    final textColor = Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey.shade700;
+    final mutedColor = textColor.withValues(alpha: 0.6);
 
     return GestureDetector(
       onTap: () => _showModelPicker(context),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.grey.shade100,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
           border: Border(
-            top: BorderSide(color: Colors.grey.shade300),
+            top: BorderSide(color: Theme.of(context).dividerColor),
           ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
           children: [
-            Row(
-              children: [
-                Icon(Icons.model_training, size: 13, color: Colors.grey.shade600),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    model,
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (ctxLimit != null) ...[
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      ctxLabel,
-                      style: TextStyle(fontSize: 9, color: Colors.grey.shade700),
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 12),
-                Icon(Icons.message, size: 13, color: Colors.grey.shade600),
-                const SizedBox(width: 4),
-                Text('$msgCount',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-                const SizedBox(width: 12),
-                Icon(Icons.token, size: 13, color: Colors.grey.shade600),
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    '~${tokens}k',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Spacer(),
-                Icon(Icons.chevron_right, size: 14, color: Colors.grey.shade400),
-              ],
-            ),
-            if (ctxLimit != null) ...[
-              const SizedBox(height: 3),
-              Row(
-                children: [
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(2),
-                      child: LinearProgressIndicator(
-                        value: ctxPct,
-                        minHeight: 4,
-                        backgroundColor: Colors.grey.shade300,
-                        valueColor: AlwaysStoppedAnimation<Color>(barColor),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${(ctxPct * 100).toInt()}%',
-                    style: TextStyle(fontSize: 9, color: Colors.grey.shade600),
-                  ),
-                ],
+            Icon(Icons.model_training, size: 12, color: mutedColor),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                model,
+                style: TextStyle(fontSize: 11, color: textColor),
+                overflow: TextOverflow.ellipsis,
               ),
-            ],
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.message, size: 11, color: mutedColor),
+            const SizedBox(width: 2),
+            Text('$msgCount',
+                style: TextStyle(fontSize: 10, color: textColor)),
+            const SizedBox(width: 8),
+            Icon(Icons.token, size: 11, color: mutedColor),
+            const SizedBox(width: 2),
+            Flexible(
+              child: Text(
+                ctxText,
+                style: TextStyle(fontSize: 10, color: textColor),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Spacer(),
+            Icon(Icons.chevron_right, size: 13, color: mutedColor),
           ],
         ),
       ),
@@ -968,15 +922,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     tempModel,
                   );
                   if (dialogCtx.mounted) Navigator.pop(dialogCtx);
-                  // Update local state
+                  // Update local state immediately
                   if (mounted) {
                     setState(() {
                       _selectedProvider = tempProvider;
                       _selectedModel = tempModel;
-                      // Also refresh model info
-                      _initModelInfo();
                     });
                   }
+                  // Refresh model info from dashboard (non-blocking for UI)
+                  _initModelInfo();
                 } catch (e) {
                   if (dialogCtx.mounted) {
                     ScaffoldMessenger.of(dialogCtx).showSnackBar(
