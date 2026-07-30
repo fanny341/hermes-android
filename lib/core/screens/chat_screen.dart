@@ -502,6 +502,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
+    // Scroll to show the new user message
+    _autoScrollToBottom();
+
     // Accumulate tokens into the streaming placeholder
     final client = GatewayChatClient(_client);
     _activeChatClient = client;
@@ -519,6 +522,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 (_messages.last['content'] as String) + token;
           }
         });
+        _autoScrollToBottom();
       },
       onToolProgress: (progress) {
         if (!mounted) return;
@@ -550,6 +554,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           }
           _flushQueuedMessage();
+          _autoScrollToBottom();
         } catch (e) {
           setState(() {
             _streaming = false;
@@ -598,13 +603,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (!mounted) return;
         _extractToolMessages(messages);
         setState(() => _messages = messages);
+        _autoScrollToBottom();
       } catch (_) {
         // Silently retry next tick
       }
     });
   }
 
-  /// Send a message that was queued while a response was streaming.
+  /// Scroll to the bottom (newest messages) — only steals scroll if the
+  /// user is already near the bottom (within 150px).
+  void _autoScrollToBottom() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    // With reverse: true, minScrollExtent = bottom (newest), pixels
+    // increases when scrolled upward toward older messages.
+    if (position.pixels - position.minScrollExtent < 150) {
+      position.animateTo(
+        position.minScrollExtent,
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.easeOut,
+      );
+    }
+  }
   /// Called once the previous task has fully completed.
   void _flushQueuedMessage() {
     final queued = _queuedMessage;
@@ -863,8 +883,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               child: FloatingActionButton.small(
                                 heroTag: 'scrollDown',
                                 onPressed: () {
+                                  if (!_scrollController.hasClients) return;
                                   _scrollController.animateTo(
-                                    0,
+                                    _scrollController.position.minScrollExtent,
                                     duration: const Duration(milliseconds: 200),
                                     curve: Curves.easeOut,
                                   );
