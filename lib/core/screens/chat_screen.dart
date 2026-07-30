@@ -961,7 +961,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 final dialogCtx = context;
                 try {
                   await _dashboardClient!.setModel(
-                    'session',
+                    'main',
                     tempProvider,
                     tempModel,
                   );
