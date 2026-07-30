@@ -555,6 +555,7 @@ class GatewayChatClient {
     required String sessionId,
     String? model,
     List<Map<String, dynamic>>? history,
+    List<Map<String, dynamic>>? tools,
     required void Function(String token) onToken,
     ToolProgressCallback? onToolProgress,
     required void Function() onDone,
@@ -565,11 +566,15 @@ class GatewayChatClient {
       history: history,
     );
 
-    final body = {
+    final body = <String, dynamic>{
       'model': model ?? 'hermes-agent',
       'messages': messages,
       'stream': true,
     };
+    // Plan mode: pass empty tools array to prevent tool execution
+    if (tools != null) {
+      body['tools'] = tools;
+    }
 
     final headers = {..._api._headers, 'X-Hermes-Session-Id': sessionId};
 

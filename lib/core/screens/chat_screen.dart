@@ -192,8 +192,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     _speechToText.cancel();
     _flutterTts.stop();
-    // Abort any active SSE stream cleanly (saves partial response on server)
-    _activeChatClient?.abort();
+    // Don't abort active stream — let it complete in background so the
+    // server saves the response. Messages reload via _fetchMessages()
+    // when the user reopens this session.
     _activeChatClient = null;
     _textController.removeListener(_onTextChanged);
     _textController.dispose();
@@ -466,6 +467,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       message: text,
       sessionId: widget.session.id,
       history: history,
+      tools: _planMode ? [] : null,
       onToken: (token) {
         if (!mounted) return;
         setState(() {
