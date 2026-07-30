@@ -447,12 +447,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
-    String text = _textController.text.trim();
+    final text = _textController.text.trim();
     if (text.isEmpty) return;
-    // Plan mode: prepend /plan command that Hermes gateway understands
-    if (_planMode) {
-      text = '/plan $text';
-    }
+    // Plan mode: the icon sets _planMode; pass it to the gateway which
+    // strips all toolsets — no /plan prefix needed.
     // A response is in flight — queue this message instead of dropping it.
     // It is sent automatically once the current task fully completes.
     if (_sending || _streaming) {
@@ -512,7 +510,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       message: text,
       sessionId: widget.session.id,
       history: history,
-      tools: _planMode ? [] : null,
+      planMode: _planMode,
       onToken: (token) {
         if (!mounted) return;
         setState(() {
