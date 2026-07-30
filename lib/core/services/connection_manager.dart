@@ -480,9 +480,8 @@ class GatewayChatClient {
     final messages = <Map<String, dynamic>>[];
     if (history != null && history.isNotEmpty) {
       for (final msg in history) {
-        final role = (msg['role'] == 'agent' || msg['role'] == 'assistant')
-            ? 'assistant'
-            : 'user';
+        final rawRole = msg['role'] as String? ?? 'user';
+        final role = rawRole == 'agent' ? 'assistant' : rawRole;
         final content = msg['content']?.toString() ?? '';
         if (content.isEmpty) continue;
         messages.add({'role': role, 'content': content});
