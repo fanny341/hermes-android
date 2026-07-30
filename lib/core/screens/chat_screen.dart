@@ -68,6 +68,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Plan mode toggle
   bool _planMode = false;
 
+  // Queued message (typed while a response is streaming)
+  String? _queuedMessage;
+
   // Voice input / spoken replies
   final SpeechToText _speechToText = SpeechToText();
   final FlutterTts _flutterTts = FlutterTts();
@@ -419,7 +422,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _sendMessage({bool speakResponse = false}) async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
-    if (_sending || _streaming) return;
+    // A response is in flight — queue this message instead of dropping it.
+    // It is sent automatically once the current task fully completes.
+    if (_sending || _streaming) {
+      setState(() {
+        _queuedMessage = text;
+        _textController.text = '';
+      });
+      return;
+    }
 
     _textController.text = '';
     _lastSentMessage = text;
@@ -507,6 +518,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               await _speakAssistantText(assistantText);
             }
           }
+          // Task fully complete — flush any message queued while streaming.
+          _flushQueuedMessage();
         } catch (e) {
           setState(() {
             _streaming = false;
@@ -537,6 +550,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _handleSendError(text, error);
       },
     );
+  }
+
+  /// Send a message that was queued while a response was streaming.
+  /// Called once the previous task has fully completed.
+  void _flushQueuedMessage() {
+    final queued = _queuedMessage;
+    if (queued == null || queued.isEmpty) return;
+    setState(() => _queuedMessage = null);
+    _textController.text = queued;
+    // Defer so the current setState/frame settles before starting a new stream.
+    Future.microtask(() {
+      if (mounted) _sendMessage();
+    });
+  }
+
+  /// Send the queued message immediately as a steering instruction, without
+  /// waiting for the current task to finish.
+  void _steerWithQueuedMessage() {
+    final queued = _queuedMessage;
+    if (queued == null || queued.isEmpty) return;
+    setState(() => _queuedMessage = null);
+    _activeChatClient?.abort();
+    setState(() {
+      _streaming = false;
+      _sending = false;
+      _thinking = false;
+    });
+    ChatScreen.streamingSessions.remove(widget.session.id);
+    _textController.text = queued;
+    Future.microtask(() {
+      if (mounted) _sendMessage();
+    });
   }
 
   void _regenerateLast() {
@@ -757,6 +802,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       child: _buildBody(),
                       ),
                       // Session info bar — above input, always visible while typing
+                      _buildQueuedMessageBar(),
                       _buildSessionInfoBar(),
                       _buildInputBar(),
                   ],
@@ -769,19 +815,99 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// One-line bar showing the message queued while a response is streaming.
+  /// Sits directly above the model info bar. Offers /steer (send now,
+  /// interrupting the current task) and a cancel button.
+  Widget _buildQueuedMessageBar() {
+    final queued = _queuedMessage;
+    if (queued == null || queued.isEmpty) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.35),
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule_send, size: 13, color: scheme.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              queued,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: scheme.onSurface),
+            ),
+          ),
+          const SizedBox(width: 6),
+          // /steer — interrupt the running task and send this now
+          InkWell(
+            onTap: _steerWithQueuedMessage,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: scheme.primary.withValues(alpha: 0.5),
+                ),
+              ),
+              child: Text(
+                '/steer',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 14),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+            tooltip: 'Cancel queued message',
+            onPressed: () => setState(() => _queuedMessage = null),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSessionInfoBar() {
     // Show newly selected model if set, otherwise fall back to session default
     final model = _selectedModel.isNotEmpty ? _selectedModel : widget.session.model;
     final msgCount = _messages.length;
+    // Rough token estimate: ~4 chars per token
     final tokens = _messages.fold<int>(0, (sum, m) {
       final c = m['content'];
-      if (c is String) return sum + c.length ~/ 4;
+      if (c is String) return sum + (c.length / 4).round();
       return sum;
     });
     final ctxLimit = _modelContextLength;
-    final ctxText = ctxLimit != null
-        ? '~${tokens}k / ${ctxLimit ~/ 1000}K'
-        : '~${tokens}k';
+    // Format as k with one decimal below 10k, whole numbers above
+    String fmtK(int n) {
+      final k = n / 1000.0;
+      if (k < 10) return '${k.toStringAsFixed(1)}k';
+      return '${k.round()}k';
+    }
+
+    final ctxText = ctxLimit != null && ctxLimit > 0
+        ? '${fmtK(tokens)} / ${fmtK(ctxLimit)}'
+        : fmtK(tokens);
+    final ctxPct = ctxLimit != null && ctxLimit > 0
+        ? (tokens / ctxLimit).clamp(0.0, 1.0)
+        : 0.0;
+    final ctxColor = ctxPct > 0.9
+        ? Colors.red
+        : ctxPct > 0.7
+            ? Colors.orange
+            : Colors.green;
 
     // Respect the app's text color (dark/light theme)
     final textColor = Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey.shade700;
@@ -815,7 +941,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 style: TextStyle(fontSize: 10, color: textColor)),
             const SizedBox(width: 8),
             Icon(Icons.token, size: 11, color: mutedColor),
-            const SizedBox(width: 2),
+            const SizedBox(width: 3),
+            // Slim inline context bar (like terminal hermes)
+            SizedBox(
+              width: 34,
+              height: 4,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: ctxPct,
+                  minHeight: 4,
+                  backgroundColor: mutedColor.withValues(alpha: 0.25),
+                  valueColor: AlwaysStoppedAnimation<Color>(ctxColor),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
             Flexible(
               child: Text(
                 ctxText,
@@ -963,7 +1104,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               child: TextField(
                 controller: _textController,
                 decoration: InputDecoration(
-                  hintText: 'Type a message…',
+                  hintText: _streaming ? 'Queue a message…' : 'Type a message…',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                   ),
@@ -978,7 +1119,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 textCapitalization: TextCapitalization.sentences,
                 keyboardType: TextInputType.multiline,
                 textInputAction: TextInputAction.send,
-                enabled: !_loading && !_streaming,
+                enabled: !_loading,
                 onSubmitted: (_) => _sendMessage(),
               ),
             ),
@@ -1008,10 +1149,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             const SizedBox(width: 4),
             CircleAvatar(
               child: _streaming
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                  ? IconButton(
+                      icon: const Icon(Icons.schedule_send, size: 20),
+                      onPressed: _sendMessage,
+                      tooltip: 'Queue message (sends when task completes)',
                     )
                   : IconButton(
                       icon: const Icon(Icons.send, size: 20),

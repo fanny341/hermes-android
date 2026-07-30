@@ -607,17 +607,47 @@ class GatewayChatClient {
       }
 
       String buffer = '';
-      await response.stream.transform(utf8.decoder).forEach((chunk) {
-        buffer += chunk;
-        while (buffer.contains('\n\n')) {
-          final eventEnd = buffer.indexOf('\n\n');
-          final frame = buffer.substring(0, eventEnd);
-          buffer = buffer.substring(eventEnd + 2);
+      bool sawDone = false;
+      final completer = Completer<void>();
+      StreamSubscription<String>? sub;
 
-          final token = parseSseFrame(frame, onToolProgress: onToolProgress);
-          if (token != null && token.isNotEmpty) onToken(token);
-        }
-      });
+      sub = response.stream.transform(utf8.decoder).listen(
+        (chunk) {
+          buffer += chunk;
+          while (buffer.contains('\n\n')) {
+            final eventEnd = buffer.indexOf('\n\n');
+            final frame = buffer.substring(0, eventEnd);
+            buffer = buffer.substring(eventEnd + 2);
+
+            // Detect the SSE terminator so we don't hang waiting for the
+            // server to close a keep-alive connection.
+            if (frame.contains('[DONE]')) {
+              sawDone = true;
+              if (!completer.isCompleted) completer.complete();
+              sub?.cancel();
+              return;
+            }
+
+            final token = parseSseFrame(frame, onToolProgress: onToolProgress);
+            if (token != null && token.isNotEmpty) onToken(token);
+          }
+        },
+        onDone: () {
+          if (!completer.isCompleted) completer.complete();
+        },
+        onError: (Object e) {
+          if (!completer.isCompleted) completer.completeError(e);
+        },
+        cancelOnError: true,
+      );
+
+      await completer.future;
+      // Flush any trailing frame left in the buffer when the stream ended
+      // without a final blank-line separator.
+      if (!sawDone && buffer.trim().isNotEmpty) {
+        final token = parseSseFrame(buffer, onToolProgress: onToolProgress);
+        if (token != null && token.isNotEmpty) onToken(token);
+      }
 
       onDone();
     } catch (e) {
