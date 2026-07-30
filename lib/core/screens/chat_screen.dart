@@ -90,6 +90,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // Scroll management
   final _scrollController = ScrollController();
+  bool _showScrollDownButton = false;
 
   @override
   void initState() {
@@ -104,6 +105,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _initVoice();
     WidgetsBinding.instance.addObserver(this);
     _initModelInfo();
+    // Scroll-to-bottom listener
+    _scrollController.addListener(() {
+      final maxScroll = _scrollController.position.maxScrollExtent;
+      final current = _scrollController.position.pixels;
+      final show = maxScroll - current > 300;
+      if (show != _showScrollDownButton) {
+        setState(() => _showScrollDownButton = show);
+      }
+    });
     // If we're re-entering a session that's actively streaming in the
     // background, reflect it in the local stream state so the stop button
     // and spinner appear immediately.
@@ -438,8 +448,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
-    final text = _textController.text.trim();
+    String text = _textController.text.trim();
     if (text.isEmpty) return;
+    // Plan mode: prepend /plan command that Hermes gateway understands
+    if (_planMode) {
+      text = '/plan $text';
+    }
     // A response is in flight — queue this message instead of dropping it.
     // It is sent automatically once the current task fully completes.
     if (_sending || _streaming) {
@@ -838,7 +852,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ],
                       ),
                       Expanded(
-                      child: _buildBody(),
+                      child: Stack(
+                        children: [
+                          _buildBody(),
+                          // Scroll-to-bottom FAB (like Gemini), appears when
+                          // scrolled up more than 300px from the bottom
+                          if (_showScrollDownButton)
+                            Positioned(
+                              right: 16,
+                              bottom: 8,
+                              child: FloatingActionButton.small(
+                                heroTag: 'scrollDown',
+                                onPressed: () {
+                                  _scrollController.animateTo(
+                                    _scrollController.position.maxScrollExtent,
+                                    duration: const Duration(milliseconds: 200),
+                                    curve: Curves.easeOut,
+                                  );
+                                },
+                                child: const Icon(Icons.arrow_downward, size: 18),
+                              ),
+                            ),
+                        ],
+                      ),
                       ),
                       // Session info bar — above input, always visible while typing
                       _buildQueuedMessageBar(),
