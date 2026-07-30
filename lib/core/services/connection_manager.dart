@@ -554,7 +554,6 @@ class GatewayChatClient {
     required String sessionId,
     String? model,
     List<Map<String, dynamic>>? history,
-    bool planMode = false,
     required void Function(String token) onToken,
     ToolProgressCallback? onToolProgress,
     required void Function() onDone,
@@ -570,10 +569,6 @@ class GatewayChatClient {
       'messages': messages,
       'stream': true,
     };
-    // Plan mode: pass model_options._plan_mode so the gateway strips tools
-    if (planMode) {
-      body['model_options'] = {'_plan_mode': true};
-    }
 
     final headers = {..._api._headers, 'X-Hermes-Session-Id': sessionId};
 

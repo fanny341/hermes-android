@@ -449,10 +449,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _sendMessage({bool speakResponse = false}) async {
     final text = _textController.text.trim();
     if (text.isEmpty) return;
-    // Plan mode: the icon sets _planMode; pass it to the gateway which
-    // strips all toolsets — no /plan prefix needed.
-    // A response is in flight — queue this message instead of dropping it.
-    // It is sent automatically once the current task fully completes.
+    // Plan mode: the icon sets _planMode; a system prompt in the history
+    // tells the AI to plan first. No /plan prefix needed.
     if (_sending || _streaming) {
       setState(() {
         _queuedMessage = text;
@@ -470,9 +468,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (_planMode) {
       history.add({
         'role': 'system',
-        'content': 'You are in PLAN MODE. Before answering, first create a '
-            'clear step-by-step plan. Think through the problem methodically '
-            'and show your reasoning step by step, then provide the final answer.',
+        'content': 'You are in PLAN MODE. For this turn, you are planning '
+            'only. Do NOT implement code, edit project files, run mutating '
+            'terminal commands, commit, push, or perform external actions. '
+            'You MAY inspect the codebase with read-only tools when needed '
+            '(read_file, search_files). Your deliverable is a clear, '
+            'actionable plan. Break it down into concrete steps with exact '
+            'file paths and commands.',
       });
     }
     for (var i = _messages.length - 1; i >= 0; i--) {
@@ -510,7 +512,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       message: text,
       sessionId: widget.session.id,
       history: history,
-      planMode: _planMode,
       onToken: (token) {
         if (!mounted) return;
         setState(() {
