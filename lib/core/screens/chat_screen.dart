@@ -105,11 +105,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _initVoice();
     WidgetsBinding.instance.addObserver(this);
     _initModelInfo();
-    // Scroll-to-bottom listener
+    // Scroll-to-bottom listener (ListView.reverse: true — position 0 = newest)
     _scrollController.addListener(() {
-      final maxScroll = _scrollController.position.maxScrollExtent;
       final current = _scrollController.position.pixels;
-      final show = maxScroll - current > 300;
+      final show = current > 100; // scrolled up from the bottom
       if (show != _showScrollDownButton) {
         setState(() => _showScrollDownButton = show);
       }
@@ -865,7 +864,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 heroTag: 'scrollDown',
                                 onPressed: () {
                                   _scrollController.animateTo(
-                                    _scrollController.position.maxScrollExtent,
+                                    0,
                                     duration: const Duration(milliseconds: 200),
                                     curve: Curves.easeOut,
                                   );
