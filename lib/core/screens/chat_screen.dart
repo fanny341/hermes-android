@@ -630,15 +630,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
   /// Called once the previous task has fully completed.
+  /// Restores the queued text into the input field as a draft — does NOT
+  /// auto-send it. The user can review and tap send themselves.
   void _flushQueuedMessage() {
     final queued = _queuedMessage;
     if (queued == null || queued.isEmpty) return;
     setState(() => _queuedMessage = null);
     _textController.text = queued;
-    // Defer so the current setState/frame settles before starting a new stream.
-    Future.microtask(() {
-      if (mounted) _sendMessage();
-    });
   }
 
   /// Send the queued message immediately as a steering instruction, without
