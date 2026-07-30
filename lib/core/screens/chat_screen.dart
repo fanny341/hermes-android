@@ -1,6 +1,7 @@
 // Chat screen with real-time streaming via REST API.
 // Uses REST endpoints: POST /api/sessions/{id}/chat and
 // GET /api/sessions/{id}/messages.
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -71,6 +72,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Queued message (typed while a response is streaming)
   String? _queuedMessage;
 
+  // Re-entry poller — checks whether a background stream has completed
+  Timer? _reentryTimer;
+
   // Voice input / spoken replies
   final SpeechToText _speechToText = SpeechToText();
   final FlutterTts _flutterTts = FlutterTts();
@@ -100,6 +104,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _initVoice();
     WidgetsBinding.instance.addObserver(this);
     _initModelInfo();
+    // If we're re-entering a session that's actively streaming in the
+    // background, reflect it in the local stream state so the stop button
+    // and spinner appear immediately.
+    if (ChatScreen.streamingSessions.contains(widget.session.id)) {
+      _streaming = true;
+      _sending = true;
+      _thinking = true;
+      // Poll until the background stream finishes so we can update live.
+      _startReentryPoll();
+    }
     // Restore draft text if available
     final saved = ChatScreen.sessionDrafts[widget.session.id];
     if (saved != null && saved.isNotEmpty) {
@@ -195,16 +209,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     _speechToText.cancel();
     _flutterTts.stop();
+    _reentryTimer?.cancel();
     // Don't abort active stream — let it complete in background so the
     // server saves the response. Messages reload via _fetchMessages()
     // when the user reopens this session.
+    // Don't remove from streamingSessions here — the stream is still
+    // running. onDone/onError (which always fire, even after dispose)
+    // clean it up. Keep the set accurate so the session list and
+    // re-entry detection work.
     _activeChatClient = null;
     _textController.removeListener(_onTextChanged);
     _textController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     _client.close();
-    ChatScreen.streamingSessions.remove(widget.session.id);
     super.dispose();
   }
 
@@ -494,6 +512,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _upsertToolProgress(progress);
       },
       onDone: () async {
+        ChatScreen.streamingSessions.remove(widget.session.id);
         if (!mounted) return;
         setState(() => _thinking = false);
         // Refresh messages to get the final server-side state
@@ -506,7 +525,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _streaming = false;
             _sending = false;
           });
-          ChatScreen.streamingSessions.remove(widget.session.id);
           if (_awaitingVoiceReply) {
             _awaitingVoiceReply = false;
             final assistant = messages.reversed.firstWhere(
@@ -518,17 +536,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               await _speakAssistantText(assistantText);
             }
           }
-          // Task fully complete — flush any message queued while streaming.
           _flushQueuedMessage();
         } catch (e) {
           setState(() {
             _streaming = false;
             _sending = false;
           });
-          ChatScreen.streamingSessions.remove(widget.session.id);
         }
       },
       onError: (error) {
+        ChatScreen.streamingSessions.remove(widget.session.id);
         if (!mounted) return;
         // If the stream was lost due to app backgrounding, show retry
         if (_retryMessage != null) {
@@ -550,6 +567,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _handleSendError(text, error);
       },
     );
+  }
+
+  /// Poll the server for new messages while a background stream is active.
+  /// Passed messages are updated live; the stream state is cleared once
+  /// streamingSessions no longer holds this session id.
+  void _startReentryPoll() {
+    _reentryTimer?.cancel();
+    _reentryTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!mounted || !ChatScreen.streamingSessions.contains(widget.session.id)) {
+        _reentryTimer?.cancel();
+        if (mounted) setState(() { _streaming = false; _sending = false; _thinking = false; });
+        return;
+      }
+      try {
+        final messages = await _client.getMessages(widget.session.id);
+        if (!mounted) return;
+        _extractToolMessages(messages);
+        setState(() => _messages = messages);
+      } catch (_) {
+        // Silently retry next tick
+      }
+    });
   }
 
   /// Send a message that was queued while a response was streaming.
@@ -926,7 +965,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Row(
           children: [
             Icon(Icons.model_training, size: 12, color: mutedColor),
-            const SizedBox(width: 4),
+            const SizedBox(width: 3),
             Flexible(
               child: Text(
                 model,
@@ -934,17 +973,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 8),
-            Icon(Icons.message, size: 11, color: mutedColor),
-            const SizedBox(width: 2),
+            const SizedBox(width: 6),
             Text('$msgCount',
                 style: TextStyle(fontSize: 10, color: textColor)),
-            const SizedBox(width: 8),
-            Icon(Icons.token, size: 11, color: mutedColor),
-            const SizedBox(width: 3),
+            const SizedBox(width: 6),
             // Slim inline context bar (like terminal hermes)
             SizedBox(
-              width: 34,
+              width: 32,
               height: 4,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(2),
@@ -956,16 +991,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                ctxText,
-                style: TextStyle(fontSize: 10, color: textColor),
-                overflow: TextOverflow.ellipsis,
-              ),
+            const SizedBox(width: 3),
+            Text(
+              ctxText,
+              style: TextStyle(fontSize: 10, color: textColor),
             ),
-            const Spacer(),
-            Icon(Icons.chevron_right, size: 13, color: mutedColor),
           ],
         ),
       ),

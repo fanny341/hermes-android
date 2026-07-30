@@ -601,8 +601,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
             child: ListTile(
               enabled: !isDeleting,
               leading: Icon(
-                session.isActive ? Icons.chat : Icons.chat_bubble_outline,
-                color: session.isActive ? const Color(0xFFD4AF37) : Colors.grey,
+                ChatScreen.streamingSessions.contains(session.id)
+                    ? Icons.terminal
+                    : (session.isActive ? Icons.chat : Icons.chat_bubble_outline),
+                color: ChatScreen.streamingSessions.contains(session.id)
+                    ? const Color(0xFFD4AF37)
+                    : (session.isActive ? Colors.white70 : Colors.grey),
               ),
               trailing: isDeleting
                   ? const SizedBox(
