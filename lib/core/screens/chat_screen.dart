@@ -556,6 +556,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _autoScrollToBottom();
         } catch (e) {
           setState(() {
+            _thinking = false;
             _streaming = false;
             _sending = false;
           });
@@ -581,6 +582,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messages.removeLast();
           }
         });
+        // Flush any queued message — the error may be transient (e.g.
+        // network drop while app was backgrounded) so the user's next
+        // message should go through without looking stuck.
+        _queuedMessage = null;
         _handleSendError(text, error);
       },
     );
